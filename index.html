@@ -2,83 +2,41 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Minimal Chat</title>
+  <title>Chat App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body {
-      margin: 0; 
-      font-family: 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #ece9e6, #ffffff);
-      display: flex; 
-      justify-content: center; 
-      align-items: center; 
-      height: 100vh;
-    }
-    .chat-container {
-      width: 100%;
-      max-width: 420px;
-      background: #fff;
-      border-radius: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      height: 80vh;
-    }
-    .chat-header {
-      padding: 16px;
-      background: #0078d7;
-      color: white;
-      font-weight: bold;
-      text-align: center;
-      letter-spacing: 1px;
-    }
-    .chat-messages {
-      flex: 1;
-      padding: 16px;
-      overflow-y: auto;
-      background: #f9f9f9;
-    }
-    .message {
-      background: #e6f0ff;
-      padding: 10px 14px;
-      margin: 6px 0;
-      border-radius: 12px;
-      animation: fadeIn 0.3s ease;
-    }
-    .chat-input {
-      display: flex;
-      border-top: 1px solid #ddd;
-    }
-    .chat-input input {
-      flex: 1;
-      border: none;
-      padding: 14px;
-      font-size: 14px;
-      outline: none;
-    }
-    .chat-input button {
-      background: #0078d7;
-      border: none;
-      color: white;
-      padding: 0 20px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .chat-input button:hover {
-      background: #005fa3;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+    body { margin:0; font-family: 'Segoe UI', sans-serif; background:#f5f7fa; display:flex; justify-content:center; align-items:center; height:100vh; }
+    .card { width:100%; max-width:420px; background:#fff; border-radius:16px; box-shadow:0 8px 24px rgba(0,0,0,0.1); overflow:hidden; display:flex; flex-direction:column; }
+    .header { background:#0078d7; color:#fff; padding:14px; text-align:center; font-weight:bold; }
+    .content { flex:1; padding:16px; overflow-y:auto; }
+    .message { background:#e6f0ff; padding:10px 14px; margin:6px 0; border-radius:12px; animation:fadeIn 0.3s ease; }
+    .input-bar { display:flex; border-top:1px solid #ddd; }
+    .input-bar input { flex:1; border:none; padding:14px; font-size:14px; outline:none; }
+    .input-bar button { background:#0078d7; border:none; color:#fff; padding:0 20px; cursor:pointer; transition:background 0.2s; }
+    .input-bar button:hover { background:#005fa3; }
+    .hidden { display:none; }
+    @keyframes fadeIn { from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
   </style>
 </head>
 <body>
-  <div class="chat-container">
-    <div class="chat-header">💬 Minimal Chat</div>
-    <div id="chat" class="chat-messages"></div>
-    <div class="chat-input">
+  <div class="card">
+    <div class="header">💬 Chat App</div>
+    <div id="auth" class="content">
+      <button onclick="login()">Sign in with Google</button>
+    </div>
+    <div id="username-setup" class="content hidden">
+      <p>Choose a username:</p>
+      <input id="usernameInput" placeholder="e.g. blo123">
+      <button onclick="saveUsername()">Save</button>
+    </div>
+    <div id="search" class="content hidden">
+      <p>Search user by username:</p>
+      <input id="searchInput" placeholder="Enter username">
+      <button onclick="searchUser()">Search</button>
+      <div id="searchResult"></div>
+    </div>
+    <div id="chat" class="content hidden"></div>
+    <div id="chatInput" class="input-bar hidden">
       <input id="msg" placeholder="Type a message...">
       <button onclick="send()">Send</button>
     </div>
@@ -86,9 +44,10 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import { getDatabase, ref, set, get, child, query, orderByChild, equalTo, push, onChildAdded } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 
-    // 🔑 Your Firebase config
+    // 🔑 Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyCvaWRvpDY-BOOg_oitS4oVGDoQkiWMR6A",
       authDomain: "windowsassistant-36760.firebaseapp.com",
@@ -99,31 +58,109 @@
       appId: "1:125638102938:web:42e36690e0b74096003423"
     };
 
-    // 🚀 Init Firebase
     const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
     const db = getDatabase(app);
-    const chatRef = ref(db, "messages");
+
+    let currentUser = null;
+    let currentChatId = null;
+
+    // 🔐 Google login
+    window.login = function() {
+      const provider = new GoogleAuthProvider();
+      signInWithPopup(auth, provider).then(result => {
+        currentUser = result.user;
+        checkUsername();
+      });
+    };
+
+    // 👤 Check if user has username
+    function checkUsername() {
+      const userRef = ref(db, "users/" + currentUser.uid);
+      get(userRef).then(snap => {
+        if (snap.exists() && snap.val().username) {
+          showSection("search");
+        } else {
+          showSection("username-setup");
+        }
+      });
+    }
+
+    // 💾 Save username
+    window.saveUsername = function() {
+      const username = document.getElementById("usernameInput").value.trim();
+      if (!username) return;
+      set(ref(db, "users/" + currentUser.uid), { username });
+      showSection("search");
+    };
+
+    // 🔍 Search user
+    window.searchUser = function() {
+      const uname = document.getElementById("searchInput").value.trim();
+      if (!uname) return;
+      const usersRef = ref(db, "users");
+      const q = query(usersRef, orderByChild("username"), equalTo(uname));
+      get(q).then(snap => {
+        if (snap.exists()) {
+          snap.forEach(childSnap => {
+            const uid = childSnap.key;
+            document.getElementById("searchResult").innerHTML = 
+              `<button onclick="startChat('${uid}')">Chat with ${uname}</button>`;
+          });
+        } else {
+          document.getElementById("searchResult").innerText = "No user found.";
+        }
+      });
+    };
+
+    // 💬 Start chat
+    window.startChat = function(otherUid) {
+      const chatId = [currentUser.uid, otherUid].sort().join("_");
+      currentChatId = chatId;
+      showSection("chat");
+      loadMessages(chatId);
+    };
+
+    // 📥 Load messages
+    function loadMessages(chatId) {
+      const chatBox = document.getElementById("chat");
+      chatBox.innerHTML = "";
+      const msgsRef = ref(db, "chats/" + chatId + "/messages");
+      onChildAdded(msgsRef, snap => {
+        const msg = snap.val();
+        const div = document.createElement("div");
+        div.className = "message";
+        div.textContent = msg.text;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      });
+    }
 
     // ✉️ Send message
     window.send = function() {
       const input = document.getElementById("msg");
       const text = input.value.trim();
-      if (text !== "") {
-        push(chatRef, { text, time: Date.now() });
-        input.value = "";
-      }
+      if (!text || !currentChatId) return;
+      const msgsRef = ref(db, "chats/" + currentChatId + "/messages");
+      push(msgsRef, { from: currentUser.uid, text, time: Date.now() });
+      input.value = "";
     };
 
-    // 📥 Listen for new messages
-    const chat = document.getElementById("chat");
-    onChildAdded(chatRef, (snap) => {
-      const msg = snap.val().text;
-      const div = document.createElement("div");
-      div.className = "message";
-      div.textContent = msg;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    });
+    // 🔄 Section switcher
+    function showSection(section) {
+      document.getElementById("auth").classList.add("hidden");
+      document.getElementById("username-setup").classList.add("hidden");
+      document.getElementById("search").classList.add("hidden");
+      document.getElementById("chat").classList.add("hidden");
+      document.getElementById("chatInput").classList.add("hidden");
+
+      if (section === "username-setup") document.getElementById("username-setup").classList.remove("hidden");
+      if (section === "search") document.getElementById("search").classList.remove("hidden");
+      if (section === "chat") {
+        document.getElementById("chat").classList.remove("hidden");
+        document.getElementById("chatInput").classList.remove("hidden");
+      }
+    }
   </script>
 </body>
 </html>
